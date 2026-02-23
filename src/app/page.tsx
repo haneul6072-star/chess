@@ -314,7 +314,7 @@ export default function Home() {
   useEffect(() => {
     if (!user) return;
     const t0 = setTimeout(() => void refreshQuotes(), 0);
-    const t = setInterval(() => void refreshQuotes(), 15000);
+    const t = setInterval(() => void refreshQuotes(), 300000);
     return () => {
       clearTimeout(t0);
       clearInterval(t);
@@ -323,7 +323,7 @@ export default function Home() {
   useEffect(() => {
     if (!user) return;
     const t0 = setTimeout(() => void refreshChart(activeSymbol), 0);
-    const t = setInterval(() => void refreshChart(activeSymbol), 60000);
+    const t = setInterval(() => void refreshChart(activeSymbol), 300000);
     return () => {
       clearTimeout(t0);
       clearInterval(t);
