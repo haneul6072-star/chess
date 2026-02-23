@@ -23,7 +23,50 @@ type LeaderboardEntry = { userId: string; username: string; cash: number; positi
 const INITIAL_CASH = 1_000_000;
 const DEFAULT_WATCHLIST = ["AAPL", "MSFT", "TSLA", "NVDA"];
 
-const box: React.CSSProperties = { border: "1px solid #ddd", borderRadius: 12, padding: 14 };
+const box: React.CSSProperties = {
+  border: "1px solid rgba(20, 24, 40, 0.08)",
+  borderRadius: 18,
+  padding: 16,
+  background: "rgba(255,255,255,0.9)",
+  boxShadow: "0 14px 36px rgba(15, 23, 42, 0.06)",
+  backdropFilter: "blur(8px)",
+};
+
+const appShell: React.CSSProperties = {
+  minHeight: "100vh",
+  padding: 24,
+  background:
+    "radial-gradient(circle at 0% 0%, rgba(16,185,129,0.12), transparent 45%), radial-gradient(circle at 100% 0%, rgba(59,130,246,0.14), transparent 40%), #f5f7fb",
+  color: "#0f172a",
+  fontFamily:
+    'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+};
+
+const inputBase: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 12,
+  border: "1px solid #d7deea",
+  background: "#fff",
+  color: "#0f172a",
+};
+
+const buttonBase: React.CSSProperties = {
+  borderRadius: 12,
+  border: "1px solid #d7deea",
+  background: "#fff",
+  color: "#0f172a",
+  padding: "9px 12px",
+  cursor: "pointer",
+  fontWeight: 600,
+};
+
+const buttonPrimary: React.CSSProperties = {
+  ...buttonBase,
+  background: "linear-gradient(135deg, #0f172a, #1f2937)",
+  color: "#fff",
+  border: "1px solid #0f172a",
+  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.18)",
+};
 
 function formatMoney(v: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(v);
@@ -69,7 +112,7 @@ function normalizePortfolio(row?: Partial<PortfolioRow> | null) {
 function Sparkline({ data }: { data: number[] }) {
   const width = 320;
   const height = 120;
-  if (data.length < 2) return <div style={{ ...box, color: "#666" }}>Not enough chart data</div>;
+  if (data.length < 2) return <div style={{ ...box, color: "#64748b" }}>Not enough chart data</div>;
   const min = Math.min(...data);
   const max = Math.max(...data);
   const range = max - min || 1;
@@ -389,16 +432,16 @@ export default function Home() {
       const league = leagueCodeInput.trim().toLowerCase();
       const uname = usernameInput.trim();
       if (!em || !password) {
-        setAuthMessage("이메일/비밀번호를 입력하세요.");
+        setAuthMessage("Enter email and password.");
         return;
       }
       if (authMode === "signup") {
-        if (!/^[A-Za-z0-9_.-]{3,20}$/.test(uname)) return setAuthMessage("닉네임 형식 오류");
-        if (!/^[A-Za-z0-9_-]{3,32}$/.test(league)) return setAuthMessage("리그 코드 형식 오류");
+        if (!/^[A-Za-z0-9_.-]{3,20}$/.test(uname)) return setAuthMessage("Invalid username format");
+        if (!/^[A-Za-z0-9_-]{3,32}$/.test(league)) return setAuthMessage("Invalid league code format");
         const { data, error } = await s.auth.signUp({ email: em, password });
         if (error) return setAuthMessage(error.message);
         if (!data.user || !data.session) {
-          return setAuthMessage("이메일 확인이 켜져 있으면 즉시 로그인되지 않습니다. (테스트용으로 이메일 확인 OFF 권장)");
+          return setAuthMessage("Email confirmation may be enabled, so instant login may not happen. For testing, disable email confirmation in Supabase Auth settings.");
         }
         const p = defaultPortfolio();
         const [r1, r2] = await Promise.all([
@@ -480,18 +523,18 @@ export default function Home() {
     [leaderboard, priceMap]
   );
 
-  if (!hydrated) return <main style={{ padding: 24 }}>Loading app...</main>;
+  if (!hydrated) return <main style={appShell}>Loading app...</main>;
 
   if (!supabaseConfigured) {
     return (
-      <main style={{ padding: 24 }}>
-        <h1>Supabase setup needed</h1>
-        <p>무료로 친구 5명이 각자 계정으로 쓰려면 Supabase Auth/DB 연결이 필요합니다.</p>
+      <main style={appShell}>
+        <h1 style={{ marginTop: 0 }}>Supabase setup needed</h1>
+        <p>Connect Supabase Auth/DB to let friends use separate accounts.</p>
         <p>
-          환경변수: <code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
+          Env vars: <code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
         </p>
         <p>
-          SQL 실행: <code>supabase/schema.sql</code>
+          Run SQL: <code>supabase/schema.sql</code>
         </p>
       </main>
     );
@@ -499,79 +542,81 @@ export default function Home() {
 
   if (!session || !user) {
     return (
-      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
-        <section style={{ ...box, width: "100%", maxWidth: 480 }}>
-          <h1 style={{ marginTop: 0 }}>Mock Invest</h1>
-          <p style={{ color: "#555" }}>친구 5명이 각자 계정으로 로그인하고 같은 리그에서 경쟁합니다.</p>
+      <main style={{ ...appShell, display: "grid", placeItems: "center" }}>
+        <section style={{ ...box, width: "100%", maxWidth: 520, padding: 24 }}>
+          <div style={{ color: "#64748b", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase" }}>League Trading</div>
+          <h1 style={{ margin: "8px 0 0", fontSize: 38, lineHeight: 1.05 }}>Mock Invest</h1>
+          <p style={{ color: "#475569" }}>Up to 5 friends can sign in and compete in the same league.</p>
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <button onClick={() => setAuthMode("login")} style={{ padding: "8px 12px" }}>로그인</button>
-            <button onClick={() => setAuthMode("signup")} style={{ padding: "8px 12px" }}>회원가입</button>
+            <button onClick={() => setAuthMode("login")} style={authMode === "login" ? buttonPrimary : buttonBase}>Login</button>
+            <button onClick={() => setAuthMode("signup")} style={authMode === "signup" ? buttonPrimary : buttonBase}>Sign up</button>
           </div>
           <form onSubmit={handleAuthSubmit} style={{ display: "grid", gap: 8 }}>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일" style={{ padding: 8 }} />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호" style={{ padding: 8 }} />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" style={inputBase} />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" style={inputBase} />
             {authMode === "signup" && (
               <>
-                <input value={usernameInput} onChange={(e) => setUsernameInput(e.target.value)} placeholder="닉네임(랭킹 표시)" style={{ padding: 8 }} />
-                <input value={leagueCodeInput} onChange={(e) => setLeagueCodeInput(e.target.value)} placeholder="리그 코드 (친구들과 동일하게)" style={{ padding: 8 }} />
+                <input value={usernameInput} onChange={(e) => setUsernameInput(e.target.value)} placeholder="Username (3-20 chars)" style={inputBase} />
+                <input value={leagueCodeInput} onChange={(e) => setLeagueCodeInput(e.target.value)} placeholder="League code (share with friends)" style={inputBase} />
               </>
             )}
-            <button type="submit" disabled={authBusy} style={{ padding: 10 }}>
-              {authBusy ? "처리 중..." : authMode === "login" ? "로그인" : "계정 만들기"}
+            <button type="submit" disabled={authBusy} style={{ ...buttonPrimary, padding: 12 }}>
+              {authBusy ? "Working..." : authMode === "login" ? "Log in" : "Create account"}
             </button>
           </form>
-          {authMessage && <div style={{ marginTop: 10, color: "#b91c1c" }}>{authMessage}</div>}
-          <div style={{ marginTop: 10, color: "#666", fontSize: 13 }}>회원가입 때 같은 리그 코드를 입력하면 경쟁 리더보드를 공유합니다.</div>
+          {authMessage && <div style={{ marginTop: 10, color: "#b91c1c", background: "#fff1f2", border: "1px solid #fecdd3", padding: 10, borderRadius: 12 }}>{authMessage}</div>}
+          <div style={{ marginTop: 10, color: "#64748b", fontSize: 13 }}>Use the same league code during signup to share a leaderboard.</div>
         </section>
       </main>
     );
   }
 
   return (
-    <main style={{ padding: 24, maxWidth: 1180, margin: "0 auto", fontFamily: "system-ui" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <main style={{ ...appShell, maxWidth: 1180, margin: "0 auto" }}>
+      <div style={{ ...box, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         <div>
-          <h1 style={{ margin: 0 }}>Mock Invest</h1>
-          <div style={{ color: "#555" }}>
+          <div style={{ color: "#64748b", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase" }}>Portfolio League</div>
+          <h1 style={{ margin: "6px 0 2px", fontSize: 42, lineHeight: 1.05 }}>Mock Invest</h1>
+          <div style={{ color: "#475569" }}>
             {profile?.username ?? user.email} · League: {profile?.league_code ?? "-"} · {status}
           </div>
-          <div style={{ color: "#666" }}>{saveStatus}</div>
+          <div style={{ color: "#64748b" }}>{saveStatus}</div>
         </div>
-        <button onClick={() => void handleLogout()} style={{ padding: "8px 12px" }}>로그아웃</button>
+        <button onClick={() => void handleLogout()} style={buttonBase}>로그아웃</button>
       </div>
 
-      <section style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
-        <div style={box}><div>Cash</div><strong>{formatMoney(cash)}</strong></div>
-        <div style={box}><div>Stock Balance</div><strong>{formatMoney(totalStockValue)}</strong></div>
-        <div style={box}><div>Total Asset</div><strong>{formatMoney(totalAsset)}</strong></div>
-        <div style={box}><div>Total Return</div><strong style={{ color: lineColor(totalReturn) }}>{formatMoney(totalReturn)} ({formatPct(totalReturnPct)})</strong></div>
+      <section style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+        <div style={box}><div style={{ color: "#64748b", fontSize: 13 }}>Cash</div><strong style={{ fontSize: 30 }}>{formatMoney(cash)}</strong></div>
+        <div style={box}><div style={{ color: "#64748b", fontSize: 13 }}>Stock Balance</div><strong style={{ fontSize: 30 }}>{formatMoney(totalStockValue)}</strong></div>
+        <div style={box}><div style={{ color: "#64748b", fontSize: 13 }}>Total Asset</div><strong style={{ fontSize: 30 }}>{formatMoney(totalAsset)}</strong></div>
+        <div style={box}><div style={{ color: "#64748b", fontSize: 13 }}>Total Return</div><strong style={{ fontSize: 28, color: lineColor(totalReturn) }}>{formatMoney(totalReturn)} ({formatPct(totalReturnPct)})</strong></div>
       </section>
 
       <section style={{ ...box, marginTop: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>League Leaderboard</h2>
-          <div style={{ color: "#666" }}>{leaderboardStatus}</div>
+          <div style={{ color: "#64748b" }}>{leaderboardStatus}</div>
         </div>
         <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
           {leaderboardRows.map((row, i) => (
-            <div key={row.userId} style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, display: "grid", gridTemplateColumns: "40px 1fr auto auto", gap: 10, background: row.userId === user.id ? "#fafafa" : "#fff" }}>
+            <div key={row.userId} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, display: "grid", gridTemplateColumns: "40px 1fr auto auto", gap: 10, background: row.userId === user.id ? "#f8fafc" : "rgba(255,255,255,0.92)" }}>
               <strong>{i + 1}</strong>
-              <div><div style={{ fontWeight: 700 }}>{row.username}</div><div style={{ color: "#666", fontSize: 12 }}>Cash {formatMoney(row.cash)} · Stock {formatMoney(row.stock)}</div></div>
+              <div><div style={{ fontWeight: 700 }}>{row.username}</div><div style={{ color: "#64748b", fontSize: 12 }}>Cash {formatMoney(row.cash)} · Stock {formatMoney(row.stock)}</div></div>
               <div>{formatMoney(row.asset)}</div>
               <div style={{ color: lineColor(row.profit) }}>{formatPct(row.profitPct)}</div>
             </div>
           ))}
-          {leaderboardRows.length === 0 && <div style={{ color: "#666" }}>No members yet.</div>}
+          {leaderboardRows.length === 0 && <div style={{ color: "#64748b" }}>No members yet.</div>}
         </div>
       </section>
 
       <section style={{ ...box, marginTop: 16 }}>
         <h2 style={{ margin: 0 }}>Held Positions</h2>
-        <div style={{ marginTop: 8, color: "#666" }}>Invested Cost: {formatMoney(totalInvestedCost)}</div>
+        <div style={{ marginTop: 8, color: "#64748b" }}>Invested Cost: {formatMoney(totalInvestedCost)}</div>
         <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
           {holdingRows.map((r) => (
-            <div key={r.symbol} style={{ border: "1px solid #eee", borderRadius: 8, padding: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 8 }}>
-              <div><strong>{r.symbol}</strong><div style={{ color: "#666" }}>Qty {r.qty}</div></div>
+            <div key={r.symbol} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 8, background: "rgba(255,255,255,0.92)" }}>
+              <div><strong>{r.symbol}</strong><div style={{ color: "#64748b" }}>Qty {r.qty}</div></div>
               <div>Avg {formatMoney(r.avg)}</div>
               <div>Current {r.price !== null ? formatMoney(r.price) : "Loading..."}</div>
               <div>Value {formatMoney(r.marketValue)}</div>
@@ -579,7 +624,7 @@ export default function Home() {
               <div style={{ color: lineColor(r.pnl) }}>Return {formatPct(r.pnlPct)}</div>
             </div>
           ))}
-          {holdingRows.length === 0 && <div style={{ color: "#666" }}>No holdings yet.</div>}
+          {holdingRows.length === 0 && <div style={{ color: "#64748b" }}>No holdings yet.</div>}
         </div>
       </section>
 
@@ -587,18 +632,18 @@ export default function Home() {
         <div style={box}>
           <h2 style={{ marginTop: 0 }}>Watchlist</h2>
           <form onSubmit={addSymbol} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input value={newSymbol} onChange={(e) => handleSymbolInputChange(e.target.value)} placeholder="Search stock" style={{ padding: 8, flex: 1, minWidth: 180 }} />
-            <button type="submit" style={{ padding: "8px 12px" }}>Add</button>
+            <input value={newSymbol} onChange={(e) => handleSymbolInputChange(e.target.value)} placeholder="Search stock" style={{ ...inputBase, flex: 1, minWidth: 180 }} />
+            <button type="submit" style={buttonPrimary}>Add</button>
           </form>
           {(searchStatus || searchResults.length > 0) && (
-            <div style={{ border: "1px solid #eee", borderRadius: 8, marginTop: 8, maxHeight: 200, overflow: "auto" }}>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, marginTop: 8, maxHeight: 200, overflow: "auto", background: "rgba(255,255,255,0.95)" }}>
               {searchStatus && searchResults.length === 0 ? (
-                <div style={{ padding: 8, color: "#666" }}>{searchStatus}</div>
+                <div style={{ padding: 8, color: "#64748b" }}>{searchStatus}</div>
               ) : (
                 searchResults.map((item) => (
-                  <button key={`${item.symbol}-${item.exchange}-${item.name}`} type="button" onClick={() => void addSymbolToWatchlist(item.symbol)} style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderBottom: "1px solid #f4f4f4", padding: 8, background: "#fff", cursor: "pointer" }}>
+                  <button key={`${item.symbol}-${item.exchange}-${item.name}`} type="button" onClick={() => void addSymbolToWatchlist(item.symbol)} style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderBottom: "1px solid #eef2f7", padding: 10, background: "#fff", cursor: "pointer" }}>
                     <div style={{ fontWeight: 700 }}>{item.symbol}</div>
-                    <div style={{ color: "#666", fontSize: 12 }}>{[item.name, item.exchange].filter(Boolean).join(" | ")}</div>
+                    <div style={{ color: "#64748b", fontSize: 12 }}>{[item.name, item.exchange].filter(Boolean).join(" | ")}</div>
                   </button>
                 ))
               )}
@@ -606,22 +651,22 @@ export default function Home() {
           )}
           <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
             {portfolioRows.map((r) => (
-              <div key={r.symbol} style={{ border: r.symbol === activeSymbol ? "2px solid #111" : "1px solid #eee", borderRadius: 8, padding: 10, display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+              <div key={r.symbol} style={{ border: r.symbol === activeSymbol ? "2px solid #0f172a" : "1px solid #e2e8f0", borderRadius: 14, padding: 12, display: "grid", gridTemplateColumns: "1fr auto", gap: 8, background: r.symbol === activeSymbol ? "rgba(241,245,249,0.85)" : "rgba(255,255,255,0.92)" }}>
                 <div onClick={() => setSelectedSymbol(r.symbol)} role="button" tabIndex={0} style={{ cursor: "pointer" }} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setSelectedSymbol(r.symbol))}>
                   <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                     <strong>{r.symbol}</strong>
-                    <button type="button" onClick={(e) => (e.stopPropagation(), removeSymbol(r.symbol))} style={{ border: "none", background: "#f3f3f3", borderRadius: 6, padding: "2px 6px", cursor: "pointer" }}>x</button>
+                    <button type="button" onClick={(e) => (e.stopPropagation(), removeSymbol(r.symbol))} style={{ border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 999, padding: "2px 8px", cursor: "pointer" }}>x</button>
                   </div>
-                  <div style={{ color: "#555" }}>Price: {r.price !== null ? formatMoney(r.price) : "Loading..."}</div>
-                  <div style={{ color: "#555" }}>Qty: {r.qty} | Avg: {r.qty ? formatMoney(r.avg) : "-"}</div>
-                  <div style={{ color: "#555" }}>
+                  <div style={{ color: "#475569" }}>Price: {r.price !== null ? formatMoney(r.price) : "Loading..."}</div>
+                  <div style={{ color: "#475569" }}>Qty: {r.qty} | Avg: {r.qty ? formatMoney(r.avg) : "-"}</div>
+                  <div style={{ color: "#475569" }}>
                     Value: {formatMoney(r.marketValue)} |{" "}
                     <span style={{ color: lineColor(r.pnl) }}>P/L {formatMoney(r.pnl)} ({formatPct(r.pnlPct)})</span>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <button onClick={() => buy(r.symbol)} style={{ padding: "8px 10px" }}>Buy 1</button>
-                  <button onClick={() => sell(r.symbol)} style={{ padding: "8px 10px" }}>Sell 1</button>
+                  <button onClick={() => buy(r.symbol)} style={{ ...buttonBase, background: "#ecfdf5", borderColor: "#bbf7d0", color: "#166534" }}>Buy 1</button>
+                  <button onClick={() => sell(r.symbol)} style={{ ...buttonBase, background: "#fff1f2", borderColor: "#fecdd3", color: "#9f1239" }}>Sell 1</button>
                 </div>
               </div>
             ))}
@@ -630,14 +675,15 @@ export default function Home() {
 
         <div style={box}>
           <h2 style={{ marginTop: 0 }}>Chart {activeSymbol ? `- ${activeSymbol}` : ""}</h2>
-          <div style={{ color: "#555" }}>{chartStatus}</div>
+          <div style={{ color: "#475569" }}>{chartStatus}</div>
           <div style={{ color: lineColor(chartDeltaPct), marginTop: 4 }}>
             {chartSeries.length > 1 ? `24h change: ${formatPct(chartDeltaPct)}` : "No chart change data"}
           </div>
           <div style={{ marginTop: 10 }}><Sparkline data={chartSeries} /></div>
-          <div style={{ marginTop: 8, color: "#555" }}>Current: {activeSymbol && priceMap[activeSymbol] ? formatMoney(priceMap[activeSymbol]) : "-"}</div>
+          <div style={{ marginTop: 8, color: "#475569" }}>Current: {activeSymbol && priceMap[activeSymbol] ? formatMoney(priceMap[activeSymbol]) : "-"}</div>
         </div>
       </section>
     </main>
   );
 }
+
