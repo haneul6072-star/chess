@@ -87,13 +87,14 @@ function BoardView({
     const cell = sqName(r, c);
     const from = selected ? parseSquare(selected) : null;
     if (from && targets.includes(cell)) {
-      let promotion: "q" | "r" | "b" | "n" | undefined;
-      if (needsPromotionChoice(snap, from, { r, c })) {
-       const parsed = choosePromotionDefault(input);
-if (!parsed || parsed === "p" || parsed === "k") return;
-promotion = parsed;
+     let promotion: "q" | "r" | "b" | "n" | undefined;
+if (needsPromotionChoice(snap, from, { r, c })) {
+  const input = window.prompt("Promotion piece? q/r/b/n", "q");
+  const parsed = choosePromotionDefault(input);
+  if (!parsed || parsed === "p" || parsed === "k") return;
+  promotion = parsed;
+}
 
-      }
       onMove(from, { r, c }, promotion);
       return;
     }
