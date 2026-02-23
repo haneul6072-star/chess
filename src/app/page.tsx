@@ -1,134 +1,153 @@
 "use client";
 
-import type { FormEvent } from "react";
-import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import type { CSSProperties, FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import {
+  choosePromotionDefault,
+  createInitialSnapshot,
+  encodeBoard,
+  legalTargetSquares,
+  makeMove,
+  needsPromotionChoice,
+  parseSquare,
+  pieceChar,
+  snapshotFromRemoteParts,
+  snapshotState,
+  sqName,
+  statusText,
+  type Color,
+  type Coord,
+  type GameStatus,
+  type Snapshot,
+} from "@/lib/chess";
 
-type Quote = { symbol: string; price: number | null };
-type Position = { qty: number; cost: number };
-type ChartResponse = { series: number[] };
-type SymbolSearchResult = { symbol: string; name: string; exchange: string };
-type ProfileRow = { user_id: string; username: string; league_code: string };
-type PortfolioRow = {
-  user_id: string;
-  league_code: string;
-  cash: number;
-  positions: unknown;
-  watchlist: unknown;
-  selected_symbol: string;
+type ProfileRow = { user_id: string; username: string };
+type GameRow = {
+  id: string;
+  join_code: string;
+  white_user_id: string;
+  black_user_id: string | null;
+  board: unknown;
+  state: unknown;
+  turn: Color;
+  status: GameStatus;
+  winner: Color | null;
+  history: unknown;
+  last_move: unknown;
+  updated_at: string;
 };
-type LeaderboardEntry = { userId: string; username: string; cash: number; positions: Record<string, Position> };
+type GameListRow = Pick<GameRow, "id" | "join_code" | "white_user_id" | "black_user_id" | "turn" | "status" | "winner" | "updated_at">;
 
-const INITIAL_CASH = 1_000_000;
-const DEFAULT_WATCHLIST = ["AAPL", "MSFT", "TSLA", "NVDA"];
-
-const box: React.CSSProperties = {
-  border: "1px solid rgba(20, 24, 40, 0.08)",
-  borderRadius: 18,
-  padding: 16,
-  background: "rgba(255,255,255,0.9)",
-  boxShadow: "0 14px 36px rgba(15, 23, 42, 0.06)",
-  backdropFilter: "blur(8px)",
-};
-
-const appShell: React.CSSProperties = {
-  minHeight: "100vh",
-  padding: 24,
-  background:
-    "radial-gradient(circle at 0% 0%, rgba(16,185,129,0.12), transparent 45%), radial-gradient(circle at 100% 0%, rgba(59,130,246,0.14), transparent 40%), #f5f7fb",
-  color: "#0f172a",
-  fontFamily:
-    'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-};
-
-const inputBase: React.CSSProperties = {
-  padding: "10px 12px",
-  borderRadius: 12,
-  border: "1px solid #d7deea",
-  background: "#fff",
-  color: "#0f172a",
-};
-
-const buttonBase: React.CSSProperties = {
-  borderRadius: 12,
-  border: "1px solid #d7deea",
-  background: "#fff",
-  color: "#0f172a",
-  padding: "9px 12px",
-  cursor: "pointer",
-  fontWeight: 600,
+const files = "abcdefgh";
+const styles: Record<string, CSSProperties> = {
+  app: { minHeight: "100vh", background: "#f5f7fb", color: "#111827", padding: 16, fontFamily: "system-ui, sans-serif" },
+  card: { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: 14, boxShadow: "0 6px 20px rgba(17,24,39,.05)" },
+  row: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" },
+  input: { border: "1px solid #d1d5db", borderRadius: 10, padding: "9px 11px", width: "100%" },
+  btn: { border: "1px solid #d1d5db", borderRadius: 10, padding: "9px 11px", background: "#fff", cursor: "pointer", fontWeight: 600 },
+  btnP: { border: "1px solid #111827", borderRadius: 10, padding: "9px 11px", background: "#111827", color: "#fff", cursor: "pointer", fontWeight: 600 },
 };
 
-const buttonPrimary: React.CSSProperties = {
-  ...buttonBase,
-  background: "linear-gradient(135deg, #0f172a, #1f2937)",
-  color: "#fff",
-  border: "1px solid #0f172a",
-  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.18)",
-};
-
-function formatMoney(v: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(v);
-}
-function formatPct(v: number) {
-  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
-}
-function lineColor(v: number) {
-  return v >= 0 ? "#0f9d58" : "#d93025";
-}
-function defaultPortfolio() {
-  return { cash: INITIAL_CASH, positions: {} as Record<string, Position>, watchlist: [...DEFAULT_WATCHLIST], selectedSymbol: DEFAULT_WATCHLIST[0] };
-}
-function parsePositions(input: unknown): Record<string, Position> {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
-  const out: Record<string, Position> = {};
-  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
-    if (!/^[A-Z0-9.-]+$/.test(k) || !v || typeof v !== "object") continue;
-    const qty = Number((v as { qty?: unknown }).qty);
-    const cost = Number((v as { cost?: unknown }).cost);
-    if (Number.isFinite(qty) && Number.isFinite(cost) && qty >= 0 && cost >= 0) out[k] = { qty, cost };
-  }
+function joinCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 6; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
   return out;
 }
-function parseWatchlist(input: unknown) {
-  if (!Array.isArray(input)) return [...DEFAULT_WATCHLIST];
-  const xs = [...new Set(input.map((x) => String(x).trim().toUpperCase()).filter((s) => /^[A-Z0-9.-]+$/.test(s)))];
-  return xs.length ? xs : [...DEFAULT_WATCHLIST];
-}
-function normalizePortfolio(row?: Partial<PortfolioRow> | null) {
-  const base = defaultPortfolio();
-  if (!row) return base;
-  const watchlist = parseWatchlist(row.watchlist);
-  const selected = typeof row.selected_symbol === "string" ? row.selected_symbol.toUpperCase() : "";
-  return {
-    cash: Number.isFinite(Number(row.cash)) ? Number(row.cash) : base.cash,
-    positions: parsePositions(row.positions),
-    watchlist,
-    selectedSymbol: watchlist.includes(selected) ? selected : (watchlist[0] ?? base.selectedSymbol),
-  };
+
+function myColor(game: GameRow | null, user: User | null): Color | null {
+  if (!game || !user) return null;
+  if (game.white_user_id === user.id) return "w";
+  if (game.black_user_id === user.id) return "b";
+  return null;
 }
 
-function Sparkline({ data }: { data: number[] }) {
-  const width = 320;
-  const height = 120;
-  if (data.length < 2) return <div style={{ ...box, color: "#64748b" }}>Not enough chart data</div>;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const pts = data
-    .map((v, i) => `${(i / (data.length - 1)) * (width - 16) + 8},${height - 8 - ((v - min) / range) * (height - 16)}`)
-    .join(" ");
-  const delta = ((data[data.length - 1] - data[0]) / (data[0] || 1)) * 100;
+function remoteSnapshot(game: GameRow): Snapshot {
+  return snapshotFromRemoteParts(game.board, game.turn, game.status, game.winner, game.history, game.last_move, game.state);
+}
+
+function BoardView({
+  snap,
+  playerColor,
+  onMove,
+  disabled,
+}: {
+  snap: Snapshot;
+  playerColor: Color | null;
+  onMove: (from: Coord, to: Coord, promotion?: "q" | "r" | "b" | "n") => void;
+  disabled?: boolean;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [targets, setTargets] = useState<string[]>([]);
+
+  const click = (r: number, c: number) => {
+    if (disabled) return;
+    const cell = sqName(r, c);
+    const from = selected ? parseSquare(selected) : null;
+    if (from && targets.includes(cell)) {
+      let promotion: "q" | "r" | "b" | "n" | undefined;
+      if (needsPromotionChoice(snap, from, { r, c })) {
+        const input = window.prompt("Promotion piece? q/r/b/n", "q");
+        const parsed = choosePromotionDefault(input);
+        if (!parsed) return;
+        promotion = parsed;
+      }
+      onMove(from, { r, c }, promotion);
+      return;
+    }
+    const piece = snap.board[r][c];
+    if (!piece || piece.c !== snap.turn || snap.status !== "playing" || (playerColor && piece.c !== playerColor)) {
+      setSelected(null);
+      setTargets([]);
+      return;
+    }
+    setSelected(cell);
+    setTargets(legalTargetSquares(snap, r, c));
+  };
+
   return (
-    <svg width="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ height, border: "1px solid #eee", borderRadius: 10 }}>
-      <polyline fill="none" stroke={lineColor(delta)} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" points={pts} />
-    </svg>
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(8, minmax(40px, 54px))", width: "fit-content", border: "2px solid #111827", borderRadius: 10, overflow: "hidden" }}>
+        {snap.board.map((row, r) =>
+          row.map((piece, c) => {
+            const cell = sqName(r, c);
+            const dark = (r + c) % 2 === 1;
+            const isTarget = targets.includes(cell);
+            const isSelected = selected === cell;
+            const isLast = !!snap.last && (snap.last.from === cell || snap.last.to === cell);
+            let bg = dark ? "#b58863" : "#f0d9b5";
+            if (isLast) bg = dark ? "#d3b13f" : "#f7e27d";
+            if (isSelected) bg = "#60a5fa";
+            if (isTarget) bg = piece ? "#fca5a5" : "#86efac";
+            return (
+              <button
+                key={cell}
+                type="button"
+                onClick={() => click(r, c)}
+                style={{ width: "min(12vw,54px)", height: "min(12vw,54px)", minWidth: 40, minHeight: 40, border: "none", background: bg, padding: 0, fontSize: 30, cursor: disabled ? "not-allowed" : "pointer" }}
+              >
+                {pieceChar(piece)}
+              </button>
+            );
+          })
+        )}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(8, minmax(40px, 54px))", width: "fit-content", marginTop: 4, fontSize: 12, color: "#6b7280", textAlign: "center" }}>
+        {files.split("").map((f) => <div key={f}>{f}</div>)}
+      </div>
+    </div>
   );
 }
 
 export default function Home() {
-  const supabaseConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const supabaseOk = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const [mode, setMode] = useState<"local" | "remote">("local");
+
+  const [localSnap, setLocalSnap] = useState<Snapshot>(createInitialSnapshot);
+  const [localMsg, setLocalMsg] = useState("Pass-and-play mode on one computer.");
+
   const [hydrated, setHydrated] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -136,554 +155,376 @@ export default function Home() {
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [usernameInput, setUsernameInput] = useState("");
-  const [leagueCodeInput, setLeagueCodeInput] = useState("friends5");
-  const [authMessage, setAuthMessage] = useState("");
+  const [username, setUsername] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [authMsg, setAuthMsg] = useState("");
 
-  const [cash, setCash] = useState(INITIAL_CASH);
-  const [positions, setPositions] = useState<Record<string, Position>>({});
-  const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_WATCHLIST);
-  const [selectedSymbol, setSelectedSymbol] = useState(DEFAULT_WATCHLIST[0]);
-  const [newSymbol, setNewSymbol] = useState("");
-  const [searchResults, setSearchResults] = useState<SymbolSearchResult[]>([]);
-  const [searchStatus, setSearchStatus] = useState("");
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [chartSeries, setChartSeries] = useState<number[]>([]);
-  const [status, setStatus] = useState("Loading quotes...");
-  const [chartStatus, setChartStatus] = useState("Loading chart...");
-  const [saveStatus, setSaveStatus] = useState("Not synced yet");
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [leaderboardStatus, setLeaderboardStatus] = useState("Login to view leaderboard");
-
-  const activeSymbol = watchlist.includes(selectedSymbol) ? selectedSymbol : (watchlist[0] ?? "");
-  const quoteUniverse = useMemo(() => {
-    const set = new Set(watchlist);
-    leaderboard.forEach((l) => Object.keys(l.positions).forEach((s) => set.add(s)));
-    return [...set].slice(0, 30);
-  }, [watchlist, leaderboard]);
-  const priceMap = useMemo(() => {
-    const m: Record<string, number> = {};
-    quotes.forEach((q) => typeof q.price === "number" && (m[q.symbol] = q.price));
-    return m;
-  }, [quotes]);
-
-  function applyPortfolioState(p: ReturnType<typeof defaultPortfolio>) {
-    setCash(p.cash);
-    setPositions(p.positions);
-    setWatchlist(p.watchlist);
-    setSelectedSymbol(p.selectedSymbol);
-    setQuotes([]);
-    setChartSeries([]);
-    setStatus("Loading quotes...");
-    setChartStatus("Loading chart...");
-  }
-
-  const loadUserData = useEffectEvent(async (authUser: User) => {
-    const s = getSupabaseBrowserClient();
-    const [pr, po] = await Promise.all([
-      s.from("profiles").select("user_id,username,league_code").eq("user_id", authUser.id).single(),
-      s.from("portfolios").select("user_id,league_code,cash,positions,watchlist,selected_symbol").eq("user_id", authUser.id).maybeSingle(),
-    ]);
-    if (pr.error) {
-      setProfile(null);
-      setAuthMessage(pr.error.message);
-      return;
-    }
-    setProfile(pr.data as ProfileRow);
-    const normalized = normalizePortfolio((po.data as PortfolioRow | null) ?? null);
-    applyPortfolioState(normalized);
-    if (!po.data) {
-      await s.from("portfolios").upsert({
-        user_id: authUser.id,
-        league_code: (pr.data as ProfileRow).league_code,
-        cash: normalized.cash,
-        positions: normalized.positions,
-        watchlist: normalized.watchlist,
-        selected_symbol: normalized.selectedSymbol,
-      });
-    }
-    setSaveStatus("Synced");
-  });
+  const [remoteGame, setRemoteGame] = useState<GameRow | null>(null);
+  const [remoteSnap, setRemoteSnap] = useState<Snapshot | null>(null);
+  const [remoteMsg, setRemoteMsg] = useState("Login to create or join a remote game.");
+  const [joinInput, setJoinInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [myGames, setMyGames] = useState<GameListRow[]>([]);
+  const gameId = remoteGame?.id ?? null;
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      if (!supabaseConfigured) {
-        setHydrated(true);
+    if (!supabaseOk) {
+      setHydrated(true);
+      return;
+    }
+    const s = getSupabaseBrowserClient();
+    void s.auth.getSession().then(({ data }) => {
+      setSession(data.session ?? null);
+      setUser(data.session?.user ?? null);
+      setHydrated(true);
+    });
+    const { data: sub } = s.auth.onAuthStateChange((_e, next) => {
+      setSession(next);
+      setUser(next?.user ?? null);
+      if (!next) {
+        setProfile(null);
+        setRemoteGame(null);
+        setRemoteSnap(null);
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [supabaseOk]);
+
+  useEffect(() => {
+    if (!user || !supabaseOk) return;
+    const s = getSupabaseBrowserClient();
+    void s.from("profiles").select("user_id,username").eq("user_id", user.id).maybeSingle().then(({ data }) => setProfile((data as ProfileRow | null) ?? null));
+  }, [user, supabaseOk]);
+
+  useEffect(() => {
+    if (!user || !supabaseOk || mode !== "remote") return;
+    const s = getSupabaseBrowserClient();
+    const load = async () => {
+      const { data } = await s
+        .from("chess_games")
+        .select("id,join_code,white_user_id,black_user_id,turn,status,winner,updated_at")
+        .or(`white_user_id.eq.${user.id},black_user_id.eq.${user.id}`)
+        .order("updated_at", { ascending: false })
+        .limit(20);
+      setMyGames((data ?? []) as GameListRow[]);
+    };
+    void load();
+    const t = setInterval(() => void load(), 5000);
+    return () => clearInterval(t);
+  }, [user, supabaseOk, mode]);
+
+  useEffect(() => {
+    if (!user || !supabaseOk || mode !== "remote" || !gameId) return;
+    const s = getSupabaseBrowserClient();
+    const load = async () => {
+      const { data, error } = await s.from("chess_games").select("*").eq("id", gameId).single();
+      if (error) {
+        setRemoteMsg(error.message);
         return;
       }
-      const s = getSupabaseBrowserClient();
-      void s.auth.getSession().then(({ data }) => {
-        setSession(data.session ?? null);
-        setUser(data.session?.user ?? null);
-        setHydrated(true);
-      });
-      s.auth.onAuthStateChange((_event, next) => {
-        setSession(next);
-        setUser(next?.user ?? null);
-      });
-    }, 0);
-    return () => clearTimeout(t);
-  }, [supabaseConfigured]);
-
-  useEffect(() => {
-    if (!hydrated || !user) {
-      if (hydrated) {
-        setProfile(null);
-        setLeaderboard([]);
-      }
-      return;
-    }
-    const t = setTimeout(() => void loadUserData(user), 0);
-    return () => clearTimeout(t);
-  }, [hydrated, user]);
-
-  const refreshQuotes = useEffectEvent(async () => {
-    if (!user || quoteUniverse.length === 0) return;
-    try {
-      const params = new URLSearchParams({ symbols: quoteUniverse.join(",") });
-      const r = await fetch(`/api/quotes?${params.toString()}`, { cache: "no-store" });
-      const data = await r.json();
-      setQuotes(data.quotes ?? []);
-      setStatus(`Updated: ${new Date().toLocaleTimeString()}`);
-    } catch {
-      setStatus("Failed to load quotes.");
-    }
-  });
-
-  const refreshChart = useEffectEvent(async (symbol: string) => {
-    if (!user || !symbol) return;
-    try {
-      setChartStatus(`Loading ${symbol} chart...`);
-      const r = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}`, { cache: "no-store" });
-      const data: ChartResponse = await r.json();
-      setChartSeries(Array.isArray(data.series) ? data.series : []);
-      setChartStatus(`Chart: ${symbol} (1h x 24)`);
-    } catch {
-      setChartStatus("Failed to load chart.");
-      setChartSeries([]);
-    }
-  });
-
-  const refreshLeaderboard = useEffectEvent(async () => {
-    if (!user || !profile?.league_code) return;
-    try {
-      setLeaderboardStatus("Loading leaderboard...");
-      const s = getSupabaseBrowserClient();
-      const [prs, pos] = await Promise.all([
-        s.from("profiles").select("user_id,username,league_code").eq("league_code", profile.league_code),
-        s.from("portfolios").select("user_id,league_code,cash,positions").eq("league_code", profile.league_code),
-      ]);
-      if (prs.error) throw new Error(prs.error.message);
-      if (pos.error) throw new Error(pos.error.message);
-      const names = new Map<string, string>();
-      ((prs.data ?? []) as ProfileRow[]).forEach((r) => names.set(r.user_id, r.username));
-      const rows: LeaderboardEntry[] = ((pos.data ?? []) as PortfolioRow[]).map((r) => ({
-        userId: r.user_id,
-        username: names.get(r.user_id) ?? "Unknown",
-        cash: Number(r.cash ?? INITIAL_CASH),
-        positions: parsePositions(r.positions),
-      }));
-      setLeaderboard(rows);
-      setLeaderboardStatus(`League: ${profile.league_code}`);
-    } catch (e) {
-      setLeaderboard([]);
-      setLeaderboardStatus(e instanceof Error ? e.message : "Failed to load leaderboard");
-    }
-  });
-
-  const savePortfolio = useEffectEvent(async () => {
-    if (!user || !profile) return;
-    try {
-      setSaveStatus("Saving...");
-      const s = getSupabaseBrowserClient();
-      const { error } = await s.from("portfolios").upsert({
-        user_id: user.id,
-        league_code: profile.league_code,
-        cash,
-        positions,
-        watchlist,
-        selected_symbol: activeSymbol || watchlist[0] || "AAPL",
-      });
-      setSaveStatus(error ? `Save failed: ${error.message}` : `Synced ${new Date().toLocaleTimeString()}`);
-    } catch {
-      setSaveStatus("Save failed");
-    }
-  });
-
-  useEffect(() => {
-    if (!user) return;
-    const t0 = setTimeout(() => void refreshQuotes(), 0);
-    const t = setInterval(() => void refreshQuotes(), 300000);
-    return () => {
-      clearTimeout(t0);
-      clearInterval(t);
+      const row = data as GameRow;
+      setRemoteGame(row);
+      setRemoteSnap(remoteSnapshot(row));
     };
-  }, [user, quoteUniverse]);
-  useEffect(() => {
-    if (!user) return;
-    const t0 = setTimeout(() => void refreshChart(activeSymbol), 0);
-    const t = setInterval(() => void refreshChart(activeSymbol), 300000);
-    return () => {
-      clearTimeout(t0);
-      clearInterval(t);
-    };
-  }, [user, activeSymbol]);
-  useEffect(() => {
-    if (!user || !profile?.league_code) return;
-    const t0 = setTimeout(() => void refreshLeaderboard(), 0);
-    const t = setInterval(() => void refreshLeaderboard(), 30000);
-    return () => {
-      clearTimeout(t0);
-      clearInterval(t);
-    };
-  }, [user, profile?.league_code]);
-  useEffect(() => {
-    if (!user || !profile) return;
-    const t = setTimeout(() => void savePortfolio(), 500);
-    return () => clearTimeout(t);
-  }, [user, profile, cash, positions, watchlist, selectedSymbol, activeSymbol]);
+    void load();
+    const t = setInterval(() => void load(), 1200);
+    return () => clearInterval(t);
+  }, [user, supabaseOk, mode, gameId]);
 
-  useEffect(() => {
-    const q = newSymbol.trim();
-    if (!user || !q) return;
-    const t = setTimeout(() => {
-      const run = async () => {
-        try {
-          setSearchStatus("Searching...");
-          const r = await fetch(`/api/symbol-search?q=${encodeURIComponent(q)}`, { cache: "no-store" });
-          const data = await r.json();
-          const results = Array.isArray(data.results) ? (data.results as SymbolSearchResult[]) : [];
-          setSearchResults(results);
-          setSearchStatus(results.length ? "" : "No results");
-        } catch {
-          setSearchStatus("Search failed");
-          setSearchResults([]);
-        }
-      };
-      void run();
-    }, 250);
-    return () => clearTimeout(t);
-  }, [user, newSymbol]);
+  const localMoves = useMemo(
+    () => (localSnap.history.length ? localSnap.history.slice(-10).map((m, i) => `${localSnap.history.length - Math.min(10, localSnap.history.length) + i + 1}. ${m.from}-${m.to}`).join("  ") : "No moves yet."),
+    [localSnap.history]
+  );
+  const remoteMoves = useMemo(
+    () => (remoteSnap?.history.length ? remoteSnap.history.slice(-10).map((m, i) => `${remoteSnap.history.length - Math.min(10, remoteSnap.history.length) + i + 1}. ${m.from}-${m.to}`).join("  ") : "No moves yet."),
+    [remoteSnap]
+  );
 
-  function handleSymbolInputChange(v: string) {
-    setNewSymbol(v);
-    if (!v.trim()) {
-      setSearchResults([]);
-      setSearchStatus("");
-    }
+  function playLocal(from: Coord, to: Coord, promotion?: "q" | "r" | "b" | "n") {
+    const next = makeMove(localSnap, from, to, promotion);
+    if (!next) return;
+    setLocalSnap(next);
+    setLocalMsg(next.status === "playing" ? "Move applied." : `Game over: ${statusText(next)}`);
   }
-  function addSymbolToWatchlist(input: string) {
-    const s = input.trim().toUpperCase();
-    if (!s || !/^[A-Z0-9.-]+$/.test(s)) return false;
-    setWatchlist((prev) => (prev.includes(s) ? prev : [...prev, s]));
-    setSelectedSymbol(s);
-    setNewSymbol("");
-    setSearchResults([]);
-    setSearchStatus("");
-    return true;
-  }
-  function addSymbol(e: FormEvent<HTMLFormElement>) {
+
+  async function authSubmit(e: FormEvent) {
     e.preventDefault();
-    void addSymbolToWatchlist(newSymbol || searchResults[0]?.symbol || "");
-  }
-  function removeSymbol(symbol: string) {
-    setWatchlist((prev) => {
-      const next = prev.filter((s) => s !== symbol);
-      return next.length ? next : [DEFAULT_WATCHLIST[0]];
-    });
-  }
-  function buy(symbol: string) {
-    const p = priceMap[symbol];
-    if (!p) return alert("Price unavailable");
-    if (cash < p) return alert("Not enough cash");
-    setCash((c) => c - p);
-    setPositions((prev) => {
-      const cur = prev[symbol] ?? { qty: 0, cost: 0 };
-      return { ...prev, [symbol]: { qty: cur.qty + 1, cost: cur.cost + p } };
-    });
-  }
-  function sell(symbol: string) {
-    const p = priceMap[symbol];
-    const cur = positions[symbol] ?? { qty: 0, cost: 0 };
-    if (!p) return alert("Price unavailable");
-    if (cur.qty <= 0) return alert("No shares");
-    setCash((c) => c + p);
-    setPositions((prev) => {
-      const pos = prev[symbol];
-      if (!pos || pos.qty <= 0) return prev;
-      const avg = pos.cost / pos.qty;
-      const nextQty = pos.qty - 1;
-      const next = { ...prev };
-      if (nextQty <= 0) delete next[symbol];
-      else next[symbol] = { qty: nextQty, cost: Math.max(0, pos.cost - avg) };
-      return next;
-    });
-  }
-
-  async function handleAuthSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!supabaseConfigured) return;
-    const s = getSupabaseBrowserClient();
+    if (!supabaseOk) return;
     setAuthBusy(true);
-    setAuthMessage("");
+    setAuthMsg("");
+    const s = getSupabaseBrowserClient();
     try {
       const em = email.trim().toLowerCase();
-      const league = leagueCodeInput.trim().toLowerCase();
-      const uname = usernameInput.trim();
-      if (!em || !password) {
-        setAuthMessage("Enter email and password.");
-        return;
-      }
+      if (!em || !password) return void setAuthMsg("Email and password are required.");
       if (authMode === "signup") {
-        if (!/^[A-Za-z0-9_.-]{3,20}$/.test(uname)) return setAuthMessage("Invalid username format");
-        if (!/^[A-Za-z0-9_-]{3,32}$/.test(league)) return setAuthMessage("Invalid league code format");
+        const name = username.trim();
+        if (!/^[A-Za-z0-9_.-]{3,20}$/.test(name)) return void setAuthMsg("Username must be 3-20 chars (letters/numbers/._-).");
         const { data, error } = await s.auth.signUp({ email: em, password });
-        if (error) return setAuthMessage(error.message);
-        if (!data.user || !data.session) {
-          return setAuthMessage("Email confirmation may be enabled, so instant login may not happen. For testing, disable email confirmation in Supabase Auth settings.");
+        if (error) return void setAuthMsg(error.message);
+        if (data.user) {
+          const { error: pErr } = await s.from("profiles").upsert({ user_id: data.user.id, username: name });
+          if (pErr) return void setAuthMsg(pErr.message);
         }
-        const p = defaultPortfolio();
-        const [r1, r2] = await Promise.all([
-          s.from("profiles").upsert({ user_id: data.user.id, username: uname, league_code: league }),
-          s.from("portfolios").upsert({
-            user_id: data.user.id,
-            league_code: league,
-            cash: p.cash,
-            positions: p.positions,
-            watchlist: p.watchlist,
-            selected_symbol: p.selectedSymbol,
-          }),
-        ]);
-        if (r1.error) return setAuthMessage(r1.error.message);
-        if (r2.error) return setAuthMessage(r2.error.message);
-        setSession(data.session);
-        setUser(data.user);
-        setProfile({ user_id: data.user.id, username: uname, league_code: league });
-        applyPortfolioState(p);
-        setPassword("");
-        return;
+      } else {
+        const { error } = await s.auth.signInWithPassword({ email: em, password });
+        if (error) return void setAuthMsg(error.message);
       }
-      const { data, error } = await s.auth.signInWithPassword({ email: em, password });
-      if (error) return setAuthMessage(error.message);
-      setSession(data.session);
-      setUser(data.user);
       setPassword("");
     } finally {
       setAuthBusy(false);
     }
   }
 
-  async function handleLogout() {
-    if (!supabaseConfigured) return;
+  async function logout() {
+    if (!supabaseOk) return;
     await getSupabaseBrowserClient().auth.signOut();
-    setSession(null);
-    setUser(null);
-    setProfile(null);
-    applyPortfolioState(defaultPortfolio());
-    setLeaderboard([]);
-    setLeaderboardStatus("Login to view leaderboard");
   }
 
-  const portfolioRows = useMemo(
-    () =>
-      watchlist.map((symbol) => {
-        const pos = positions[symbol] ?? { qty: 0, cost: 0 };
-        const price = priceMap[symbol] ?? null;
-        const avg = pos.qty > 0 ? pos.cost / pos.qty : 0;
-        const marketValue = price && pos.qty > 0 ? price * pos.qty : 0;
-        const pnl = pos.qty > 0 && price ? marketValue - pos.cost : 0;
-        const pnlPct = pos.qty > 0 && pos.cost > 0 ? (pnl / pos.cost) * 100 : 0;
-        return { symbol, price, qty: pos.qty, avg, marketValue, pnl, pnlPct };
-      }),
-    [watchlist, positions, priceMap]
-  );
-  const holdingRows = portfolioRows.filter((r) => r.qty > 0);
-  const totalStockValue = holdingRows.reduce((s, r) => s + r.marketValue, 0);
-  const totalAsset = cash + totalStockValue;
-  const totalReturn = totalAsset - INITIAL_CASH;
-  const totalReturnPct = (totalReturn / INITIAL_CASH) * 100;
-  const totalInvestedCost = holdingRows.reduce((s, r) => s + r.avg * r.qty, 0);
-  const chartDeltaPct = chartSeries.length > 1 && chartSeries[0] ? ((chartSeries[chartSeries.length - 1] - chartSeries[0]) / chartSeries[0]) * 100 : 0;
+  async function createRemoteGame() {
+    if (!user || !supabaseOk) return;
+    setBusy(true);
+    setRemoteMsg("Creating game...");
+    try {
+      const s = getSupabaseBrowserClient();
+      const snap = createInitialSnapshot();
+      for (let i = 0; i < 5; i += 1) {
+        const payload = {
+          join_code: joinCode(),
+          white_user_id: user.id,
+          black_user_id: null,
+          board: encodeBoard(snap.board),
+          state: snapshotState(snap),
+          turn: snap.turn,
+          status: snap.status,
+          winner: snap.winner,
+          history: snap.history,
+          last_move: snap.last,
+        };
+        const { data, error } = await s.from("chess_games").insert(payload).select("*").single();
+        if (!error && data) {
+          const row = data as GameRow;
+          setRemoteGame(row);
+          setRemoteSnap(remoteSnapshot(row));
+          setRemoteMsg(`Game created. Share code ${row.join_code}`);
+          return;
+        }
+      }
+      setRemoteMsg("Failed to create game.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  const leaderboardRows = useMemo(
-    () =>
-      leaderboard
-        .map((row) => {
-          let stock = 0;
-          for (const [sym, pos] of Object.entries(row.positions)) {
-            const p = priceMap[sym];
-            if (p) stock += p * pos.qty;
-          }
-          const asset = row.cash + stock;
-          const profit = asset - INITIAL_CASH;
-          return { ...row, stock, asset, profit, profitPct: (profit / INITIAL_CASH) * 100 };
+  async function joinRemoteGame() {
+    if (!user || !supabaseOk) return;
+    const code = joinInput.trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,10}$/.test(code)) return void setRemoteMsg("Invalid join code.");
+    setBusy(true);
+    setRemoteMsg("Joining game...");
+    try {
+      const s = getSupabaseBrowserClient();
+      const { data, error } = await s.from("chess_games").select("*").eq("join_code", code).maybeSingle();
+      if (error) return void setRemoteMsg(error.message);
+      const row = data as GameRow | null;
+      if (!row) return void setRemoteMsg("Game not found.");
+      if (row.white_user_id === user.id || row.black_user_id === user.id) {
+        setRemoteGame(row);
+        setRemoteSnap(remoteSnapshot(row));
+        setRemoteMsg(`Connected to ${row.join_code}`);
+        return;
+      }
+      if (row.black_user_id) return void setRemoteMsg("Game already has two players.");
+      const { data: joined, error: joinErr } = await s
+        .from("chess_games")
+        .update({ black_user_id: user.id })
+        .eq("id", row.id)
+        .is("black_user_id", null)
+        .select("*")
+        .single();
+      if (joinErr) return void setRemoteMsg(joinErr.message);
+      const jr = joined as GameRow;
+      setRemoteGame(jr);
+      setRemoteSnap(remoteSnapshot(jr));
+      setRemoteMsg(`Joined ${jr.join_code}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadGame(id: string) {
+    if (!supabaseOk) return;
+    const s = getSupabaseBrowserClient();
+    const { data, error } = await s.from("chess_games").select("*").eq("id", id).single();
+    if (error) return void setRemoteMsg(error.message);
+    const row = data as GameRow;
+    setRemoteGame(row);
+    setRemoteSnap(remoteSnapshot(row));
+    setRemoteMsg(`Loaded ${row.join_code}`);
+  }
+
+  async function playRemote(from: Coord, to: Coord, promotion?: "q" | "r" | "b" | "n") {
+    if (!user || !supabaseOk || !remoteGame || !remoteSnap) return;
+    const color = myColor(remoteGame, user);
+    if (!color) return void setRemoteMsg("You are not a player in this game.");
+    if (remoteSnap.turn !== color) return void setRemoteMsg("Not your turn.");
+
+    const next = makeMove(remoteSnap, from, to, promotion);
+    if (!next) return;
+
+    setBusy(true);
+    setRemoteMsg("Sending move...");
+    try {
+      const s = getSupabaseBrowserClient();
+      const { data, error } = await s
+        .from("chess_games")
+        .update({
+          board: encodeBoard(next.board),
+          state: snapshotState(next),
+          turn: next.turn,
+          status: next.status,
+          winner: next.winner,
+          history: next.history,
+          last_move: next.last,
         })
-        .sort((a, b) => b.asset - a.asset),
-    [leaderboard, priceMap]
-  );
-
-  if (!hydrated) return <main style={appShell}>Loading app...</main>;
-
-  if (!supabaseConfigured) {
-    return (
-      <main style={appShell}>
-        <h1 style={{ marginTop: 0 }}>Supabase setup needed</h1>
-        <p>Connect Supabase Auth/DB to let friends use separate accounts.</p>
-        <p>
-          Env vars: <code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
-        </p>
-        <p>
-          Run SQL: <code>supabase/schema.sql</code>
-        </p>
-      </main>
-    );
+        .eq("id", remoteGame.id)
+        .eq("turn", remoteSnap.turn)
+        .select("*")
+        .single();
+      if (error) return void setRemoteMsg(error.message);
+      const row = data as GameRow;
+      setRemoteGame(row);
+      setRemoteSnap(remoteSnapshot(row));
+      setRemoteMsg(next.status === "playing" ? "Move sent." : `Game over: ${statusText(next)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  if (!session || !user) {
-    return (
-      <main style={{ ...appShell, display: "grid", placeItems: "center" }}>
-        <section style={{ ...box, width: "100%", maxWidth: 520, padding: 24 }}>
-          <div style={{ color: "#64748b", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase" }}>League Trading</div>
-          <h1 style={{ margin: "8px 0 0", fontSize: 38, lineHeight: 1.05 }}>Mock Invest</h1>
-          <p style={{ color: "#475569" }}>Up to 5 friends can sign in and compete in the same league.</p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <button onClick={() => setAuthMode("login")} style={authMode === "login" ? buttonPrimary : buttonBase}>Login</button>
-            <button onClick={() => setAuthMode("signup")} style={authMode === "signup" ? buttonPrimary : buttonBase}>Sign up</button>
-          </div>
-          <form onSubmit={handleAuthSubmit} style={{ display: "grid", gap: 8 }}>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" style={inputBase} />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" style={inputBase} />
-            {authMode === "signup" && (
-              <>
-                <input value={usernameInput} onChange={(e) => setUsernameInput(e.target.value)} placeholder="Username (3-20 chars)" style={inputBase} />
-                <input value={leagueCodeInput} onChange={(e) => setLeagueCodeInput(e.target.value)} placeholder="League code (share with friends)" style={inputBase} />
-              </>
-            )}
-            <button type="submit" disabled={authBusy} style={{ ...buttonPrimary, padding: 12 }}>
-              {authBusy ? "Working..." : authMode === "login" ? "Log in" : "Create account"}
-            </button>
-          </form>
-          {authMessage && <div style={{ marginTop: 10, color: "#b91c1c", background: "#fff1f2", border: "1px solid #fecdd3", padding: 10, borderRadius: 12 }}>{authMessage}</div>}
-          <div style={{ marginTop: 10, color: "#64748b", fontSize: 13 }}>Use the same league code during signup to share a leaderboard.</div>
-        </section>
-      </main>
-    );
-  }
+  if (!hydrated) return <main style={styles.app}>Loading...</main>;
 
   return (
-    <main style={{ ...appShell, maxWidth: 1180, margin: "0 auto" }}>
-      <div style={{ ...box, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <div>
-          <div style={{ color: "#64748b", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase" }}>Portfolio League</div>
-          <h1 style={{ margin: "6px 0 2px", fontSize: 42, lineHeight: 1.05 }}>Mock Invest</h1>
-          <div style={{ color: "#475569" }}>
-            {profile?.username ?? user.email} · League: {profile?.league_code ?? "-"} · {status}
+    <main style={{ ...styles.app, maxWidth: 1180, margin: "0 auto" }}>
+      <div style={{ ...styles.card, marginBottom: 14 }}>
+        <div style={{ ...styles.row, justifyContent: "space-between" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 30 }}>Chess With Friends</h1>
+            <div style={{ color: "#4b5563", marginTop: 6 }}>Remote 1v1 + pass-and-play on one computer. Full core rules added.</div>
           </div>
-          <div style={{ color: "#64748b" }}>{saveStatus}</div>
+          <div style={styles.row}>
+            <button type="button" style={mode === "local" ? styles.btnP : styles.btn} onClick={() => setMode("local")}>Local</button>
+            <button type="button" style={mode === "remote" ? styles.btnP : styles.btn} onClick={() => setMode("remote")}>Remote</button>
+          </div>
         </div>
-        <button onClick={() => void handleLogout()} style={buttonBase}>로그아웃</button>
       </div>
 
-      <section style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
-        <div style={box}><div style={{ color: "#64748b", fontSize: 13 }}>Cash</div><strong style={{ fontSize: 30 }}>{formatMoney(cash)}</strong></div>
-        <div style={box}><div style={{ color: "#64748b", fontSize: 13 }}>Stock Balance</div><strong style={{ fontSize: 30 }}>{formatMoney(totalStockValue)}</strong></div>
-        <div style={box}><div style={{ color: "#64748b", fontSize: 13 }}>Total Asset</div><strong style={{ fontSize: 30 }}>{formatMoney(totalAsset)}</strong></div>
-        <div style={box}><div style={{ color: "#64748b", fontSize: 13 }}>Total Return</div><strong style={{ fontSize: 28, color: lineColor(totalReturn) }}>{formatMoney(totalReturn)} ({formatPct(totalReturnPct)})</strong></div>
-      </section>
-
-      <section style={{ ...box, marginTop: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-          <h2 style={{ margin: 0 }}>League Leaderboard</h2>
-          <div style={{ color: "#64748b" }}>{leaderboardStatus}</div>
-        </div>
-        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-          {leaderboardRows.map((row, i) => (
-            <div key={row.userId} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, display: "grid", gridTemplateColumns: "40px 1fr auto auto", gap: 10, background: row.userId === user.id ? "#f8fafc" : "rgba(255,255,255,0.92)" }}>
-              <strong>{i + 1}</strong>
-              <div><div style={{ fontWeight: 700 }}>{row.username}</div><div style={{ color: "#64748b", fontSize: 12 }}>Cash {formatMoney(row.cash)} · Stock {formatMoney(row.stock)}</div></div>
-              <div>{formatMoney(row.asset)}</div>
-              <div style={{ color: lineColor(row.profit) }}>{formatPct(row.profitPct)}</div>
+      {mode === "local" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(320px,520px) 1fr", gap: 14, alignItems: "start" }}>
+          <div style={styles.card}>
+            <BoardView key={`${localSnap.history.length}-${localSnap.turn}-${localSnap.status}`} snap={localSnap} playerColor={null} onMove={playLocal} />
+          </div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={styles.card}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Local Game</div>
+              <div>{statusText(localSnap)}</div>
+              <div style={{ color: "#4b5563", marginTop: 8 }}>{localMsg}</div>
+              <div style={{ marginTop: 10 }}>
+                <button type="button" style={styles.btnP} onClick={() => { setLocalSnap(createInitialSnapshot()); setLocalMsg("New local game started."); }}>New Game</button>
+              </div>
             </div>
-          ))}
-          {leaderboardRows.length === 0 && <div style={{ color: "#64748b" }}>No members yet.</div>}
-        </div>
-      </section>
-
-      <section style={{ ...box, marginTop: 16 }}>
-        <h2 style={{ margin: 0 }}>Held Positions</h2>
-        <div style={{ marginTop: 8, color: "#64748b" }}>Invested Cost: {formatMoney(totalInvestedCost)}</div>
-        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-          {holdingRows.map((r) => (
-            <div key={r.symbol} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 8, background: "rgba(255,255,255,0.92)" }}>
-              <div><strong>{r.symbol}</strong><div style={{ color: "#64748b" }}>Qty {r.qty}</div></div>
-              <div>Avg {formatMoney(r.avg)}</div>
-              <div>Current {r.price !== null ? formatMoney(r.price) : "Loading..."}</div>
-              <div>Value {formatMoney(r.marketValue)}</div>
-              <div style={{ color: lineColor(r.pnl) }}>P/L {formatMoney(r.pnl)}</div>
-              <div style={{ color: lineColor(r.pnl) }}>Return {formatPct(r.pnlPct)}</div>
+            <div style={styles.card}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Recent Moves</div>
+              <div style={{ color: "#4b5563", lineHeight: 1.6, wordBreak: "break-word" }}>{localMoves}</div>
             </div>
-          ))}
-          {holdingRows.length === 0 && <div style={{ color: "#64748b" }}>No holdings yet.</div>}
+          </div>
         </div>
-      </section>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(320px,520px) 1fr", gap: 14, alignItems: "start" }}>
+          <div style={styles.card}>
+            {remoteSnap ? (
+              <>
+                <BoardView key={`${remoteSnap.history.length}-${remoteSnap.turn}-${remoteSnap.status}`} snap={remoteSnap} playerColor={myColor(remoteGame, user)} onMove={(f, t, p) => void playRemote(f, t, p)} disabled={busy} />
+                <div style={{ marginTop: 10 }}>{statusText(remoteSnap)}</div>
+              </>
+            ) : (
+              <div style={{ color: "#6b7280" }}>Create or load a remote game to see the board.</div>
+            )}
+          </div>
 
-      <section style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 16 }}>
-        <div style={box}>
-          <h2 style={{ marginTop: 0 }}>Watchlist</h2>
-          <form onSubmit={addSymbol} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input value={newSymbol} onChange={(e) => handleSymbolInputChange(e.target.value)} placeholder="Search stock" style={{ ...inputBase, flex: 1, minWidth: 180 }} />
-            <button type="submit" style={buttonPrimary}>Add</button>
-          </form>
-          {(searchStatus || searchResults.length > 0) && (
-            <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, marginTop: 8, maxHeight: 200, overflow: "auto", background: "rgba(255,255,255,0.95)" }}>
-              {searchStatus && searchResults.length === 0 ? (
-                <div style={{ padding: 8, color: "#64748b" }}>{searchStatus}</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={styles.card}>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>Remote Match</div>
+              {!supabaseOk ? (
+                <div style={{ color: "#92400e" }}>Set Supabase env vars and run `supabase/schema.sql` first.</div>
+              ) : !session || !user ? (
+                <>
+                  <div style={{ ...styles.row, marginBottom: 8 }}>
+                    <button type="button" style={authMode === "login" ? styles.btnP : styles.btn} onClick={() => setAuthMode("login")}>Login</button>
+                    <button type="button" style={authMode === "signup" ? styles.btnP : styles.btn} onClick={() => setAuthMode("signup")}>Sign up</button>
+                  </div>
+                  <form onSubmit={authSubmit} style={{ display: "grid", gap: 8 }}>
+                    <input style={styles.input} type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                    <input style={styles.input} type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                    {authMode === "signup" && <input style={styles.input} placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />}
+                    <button type="submit" style={styles.btnP} disabled={authBusy}>{authBusy ? "Working..." : authMode === "login" ? "Login" : "Create account"}</button>
+                  </form>
+                  {authMsg && <div style={{ color: "#b91c1c", marginTop: 8 }}>{authMsg}</div>}
+                </>
               ) : (
-                searchResults.map((item) => (
-                  <button key={`${item.symbol}-${item.exchange}-${item.name}`} type="button" onClick={() => void addSymbolToWatchlist(item.symbol)} style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderBottom: "1px solid #eef2f7", padding: 10, background: "#fff", cursor: "pointer" }}>
-                    <div style={{ fontWeight: 700 }}>{item.symbol}</div>
-                    <div style={{ color: "#64748b", fontSize: 12 }}>{[item.name, item.exchange].filter(Boolean).join(" | ")}</div>
-                  </button>
-                ))
+                <>
+                  <div style={{ ...styles.row, justifyContent: "space-between" }}>
+                    <strong>{profile?.username ?? user.email}</strong>
+                    <button type="button" style={styles.btn} onClick={() => void logout()}>Logout</button>
+                  </div>
+                  <div style={{ color: "#4b5563", marginTop: 8 }}>{remoteMsg}</div>
+                  <div style={{ ...styles.row, marginTop: 10 }}>
+                    <button type="button" style={styles.btnP} disabled={busy} onClick={() => void createRemoteGame()}>Create Game (White)</button>
+                  </div>
+                  <div style={{ ...styles.row, marginTop: 10 }}>
+                    <input style={{ ...styles.input, flex: 1 }} placeholder="Join code" value={joinInput} onChange={(e) => setJoinInput(e.target.value.toUpperCase())} />
+                    <button type="button" style={styles.btn} disabled={busy} onClick={() => void joinRemoteGame()}>Join</button>
+                  </div>
+                </>
               )}
             </div>
-          )}
-          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-            {portfolioRows.map((r) => (
-              <div key={r.symbol} style={{ border: r.symbol === activeSymbol ? "2px solid #0f172a" : "1px solid #e2e8f0", borderRadius: 14, padding: 12, display: "grid", gridTemplateColumns: "1fr auto", gap: 8, background: r.symbol === activeSymbol ? "rgba(241,245,249,0.85)" : "rgba(255,255,255,0.92)" }}>
-                <div onClick={() => setSelectedSymbol(r.symbol)} role="button" tabIndex={0} style={{ cursor: "pointer" }} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setSelectedSymbol(r.symbol))}>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                    <strong>{r.symbol}</strong>
-                    <button type="button" onClick={(e) => (e.stopPropagation(), removeSymbol(r.symbol))} style={{ border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 999, padding: "2px 8px", cursor: "pointer" }}>x</button>
-                  </div>
-                  <div style={{ color: "#475569" }}>Price: {r.price !== null ? formatMoney(r.price) : "Loading..."}</div>
-                  <div style={{ color: "#475569" }}>Qty: {r.qty} | Avg: {r.qty ? formatMoney(r.avg) : "-"}</div>
-                  <div style={{ color: "#475569" }}>
-                    Value: {formatMoney(r.marketValue)} |{" "}
-                    <span style={{ color: lineColor(r.pnl) }}>P/L {formatMoney(r.pnl)} ({formatPct(r.pnlPct)})</span>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <button onClick={() => buy(r.symbol)} style={{ ...buttonBase, background: "#ecfdf5", borderColor: "#bbf7d0", color: "#166534" }}>Buy 1</button>
-                  <button onClick={() => sell(r.symbol)} style={{ ...buttonBase, background: "#fff1f2", borderColor: "#fecdd3", color: "#9f1239" }}>Sell 1</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
 
-        <div style={box}>
-          <h2 style={{ marginTop: 0 }}>Chart {activeSymbol ? `- ${activeSymbol}` : ""}</h2>
-          <div style={{ color: "#475569" }}>{chartStatus}</div>
-          <div style={{ color: lineColor(chartDeltaPct), marginTop: 4 }}>
-            {chartSeries.length > 1 ? `24h change: ${formatPct(chartDeltaPct)}` : "No chart change data"}
+            {session && user && supabaseOk && (
+              <>
+                <div style={styles.card}>
+                  <div style={{ fontWeight: 700, marginBottom: 8 }}>Current Game</div>
+                  {!remoteGame || !remoteSnap ? (
+                    <div style={{ color: "#6b7280" }}>None selected.</div>
+                  ) : (
+                    <div style={{ display: "grid", gap: 6, color: "#374151" }}>
+                      <div>Code: <code>{remoteGame.join_code}</code></div>
+                      <div>Your color: {myColor(remoteGame, user) === "w" ? "White" : myColor(remoteGame, user) === "b" ? "Black" : "Spectator"}</div>
+                      <div>Players: {remoteGame.black_user_id ? "2/2" : "1/2 (waiting for Black)"}</div>
+                      <div>Last update: {new Date(remoteGame.updated_at).toLocaleString()}</div>
+                      <div>Recent moves: {remoteMoves}</div>
+                    </div>
+                  )}
+                </div>
+                <div style={styles.card}>
+                  <div style={{ fontWeight: 700, marginBottom: 8 }}>My Recent Games</div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {myGames.map((g) => (
+                      <button key={g.id} type="button" onClick={() => void loadGame(g.id)} style={{ ...styles.btn, textAlign: "left", padding: 10, background: remoteGame?.id === g.id ? "#eff6ff" : "#fff" }}>
+                        <div style={{ ...styles.row, justifyContent: "space-between" }}>
+                          <strong>{g.join_code}</strong>
+                          <span style={{ color: "#6b7280", fontSize: 12 }}>{new Date(g.updated_at).toLocaleString()}</span>
+                        </div>
+                        <div style={{ color: "#4b5563", marginTop: 4 }}>
+                          {g.status === "playing" ? "In progress" : g.status === "checkmate" ? `Checkmate (${g.winner === "w" ? "White" : "Black"} wins)` : g.status === "stalemate" ? "Stalemate" : "Draw"}
+                        </div>
+                      </button>
+                    ))}
+                    {myGames.length === 0 && <div style={{ color: "#6b7280" }}>No games yet.</div>}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-          <div style={{ marginTop: 10 }}><Sparkline data={chartSeries} /></div>
-          <div style={{ marginTop: 8, color: "#475569" }}>Current: {activeSymbol && priceMap[activeSymbol] ? formatMoney(priceMap[activeSymbol]) : "-"}</div>
         </div>
-      </section>
+      )}
     </main>
   );
 }
-
