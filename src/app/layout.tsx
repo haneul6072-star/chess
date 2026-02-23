@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Mock Invest",
-  description: "Mock trading app",
+  title: "Chess With Friends",
+  description: "Online 1v1 chess with remote play and pass-and-play",
 };
 
 export default function RootLayout({
